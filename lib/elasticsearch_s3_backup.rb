@@ -6,53 +6,61 @@ require 'faker'
 require 'pagerduty'
 require 'yaml'
 require 'sentry-raven'
+require 'ostruct'
 
 module EverTools
   class ElasticsearchS3Backup
-    def conf
-      @conf ||= YAML.load_file('/etc/s3_backup.yml')
-    end
+    extend Forwardable
+
+    def_delegators :@conf,
+                   :pagerduty_api_key,
+                   :test_size,
+                   :new_repo_params,
+                   :sentry_dsn,
+                   :node_name,
+                   :elasticsearch_auth_file,
+                   :cluster_name
+
+    attr_reader :conf
 
     def pagerduty
-      @pagerduty ||= Pagerduty.new conf['pagerduty_api_key']
-    end
-
-    def configure_sentry!
-      Raven.configure { config.dsn = conf['sentry_dsn'] }
+      @pagerduty ||= Pagerduty.new pagerduty_api_key
     end
 
     def auth
-      @auth ||= File.read(conf['elasticsearch_auth_file']).strip.split ':'
+      @auth ||= File.read(elasticsearch_auth_file).strip.split ':'
     end
 
     def initialize
+      @conf = OpenStruct.new(YAML.load_file('/etc/s3_backup.yml'))
+      Raven.configure { config.dsn = sentry_dsn } if sentry_dsn
+
       Unirest.default_header 'Accept', 'application/json'
       Unirest.default_header 'Content-Type', 'application/json'
       Unirest.timeout 30
 
       @url = 'http://localhost:9200'
 
-      @backup_index  = 'backup_test'
-      @restore_index = 'restore_test'
+      test_backup_timestamp = Time.now.to_i
+      @backup_index  = "backup_test_#{test_backup_timestamp}"
+      @restore_index = "restore_test_#{test_backup_timestamp}"
 
       now       = Time.new.utc
       @monthly  = now.strftime '%m-%Y'
       @datetime = now.strftime '%m-%d_%H%M'
 
-      @monthly_snap_url = "#{@url}/_snapshot/#{@monthly}"
+      @monthly_snap_url = [@url, '_snapshot', @monthly].join('/')
 
-      @backup_timeout = 1.hours
+      @backup_timeout = 1.hour
     end
 
     def logger
-      # Set up logging
-      @logger ||= Logger.new(conf['log']).tap do |l|
+      @logger ||= Logger.new(@conf['log']).tap do |l|
         l.level = Logger::INFO
         l.progname = 's3_backup'
-        l.formatter =
-          proc do |severity, datetime, progname, msg|
-            "#{datetime.utc} [#{progname}] #{severity}: #{msg}\n"
-          end
+        l.formatter = proc do |severity, datetime, progname, msg|
+          "#{datetime.utc} [#{progname}] #{severity}: #{msg}\n"
+        end
       end
     end
 
@@ -84,7 +92,7 @@ module EverTools
     # rubocop:enable Metrics/AbcSize
 
     def master?
-      es_api(:get, "#{@url}/_cat/master").body[0]['node'] == conf['node_name']
+      es_api(:get, "#{@url}/_cat/master").body[0]['node'] == node_name
     end
 
     # Check if an index exists
@@ -98,11 +106,15 @@ module EverTools
     end
 
     def notify(e)
-      pagerduty.trigger(
-        'prod Elasticsearch S3 failed',
-        client: conf['node_name'],
-        details: "#{e.message}\n\n#{e.backtrace}"
-      )
+      if conf['env'] == 'prod'
+        pagerduty.trigger(
+          'prod Elasticsearch S3 failed',
+          client: node_name,
+          details: "#{e.message}\n\n#{e.backtrace}"
+        )
+      end
+
+      Raven.capture_exception(e) if sentry_dsn
     end
 
     def insert_test_data
@@ -113,7 +125,7 @@ module EverTools
       # Updates the set of `dummy` documents in the `backup_test` on every run
 
       logger.info 'Generating test data using Faker…'
-      conf['test_size'].times do |i|
+      test_size.times do |i|
         es_api(
           :put,
           "#{@url}/#{@backup_index}/dummy/#{i}",
@@ -134,7 +146,7 @@ module EverTools
     end
 
     def create_repo
-      new_repo_params = conf['new_repo_params'].merge(
+      new_repo_params = new_repo_params.merge(
         type: 's3',
         settings: {
           base_path: "/elasticsearch/#{cluster_name}/#{conf['env']}/#{@monthly}",
@@ -276,7 +288,7 @@ module EverTools
       logger.info "Verifying the newly-restored #{@backup_index}…"
       wait_for_index @restore_index
 
-      conf['test_size'].times { |i| compare_index_item! i }
+      test_size.times { |i| compare_index_item! i }
 
       logger.info 'Successfully verified the test data!'
     end
@@ -288,8 +300,6 @@ module EverTools
                     'backup.'
         exit 0
       end
-
-      configure_sentry!
 
       # Remove the previous `restore_test` index, to avoid a race condition
       # with checking the restored copy of this index
@@ -305,10 +315,9 @@ module EverTools
       remove_expired_backups
       logger.info 'Finished'
     rescue Exception => e # Need to rescue "Exception" so that Sentry gets it
-      notify e if conf['env'] == 'prod'
+      notify e
       logger.fatal e.message
       logger.fatal e.backtrace
-      Raven.capture_exception(e)
       raise e
     end
     # rubocop:enable Metrics/AbcSize, Lint/RescueException

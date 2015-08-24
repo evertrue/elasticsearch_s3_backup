@@ -5,9 +5,11 @@ describe EverTools::ElasticsearchS3Backup do
     expect(EverTools::ElasticsearchS3Backup::VERSION).not_to be nil
   end
 
-  before(:each) do
-    @url = 'http://localhost:9200'
-    @conf = {
+  let(:es_url) { 'http://localhost:9200' }
+  let(:node_name) { 'test_node' }
+
+  let(:ets3b) do
+    conf = {
       'env' => 'dev',
       'pagerduty_api_key' => 'BOGUS_API_KEY',
       'notification_email' => 'testemail@domain.com',
@@ -23,32 +25,35 @@ describe EverTools::ElasticsearchS3Backup do
       'cluster_name' => 'spec_test_cluster'
     }
 
-    @ets3b = EverTools::ElasticsearchS3Backup.new
+    allow(YAML).to receive(:load_file).with(any_args).and_return(conf)
 
-    allow(@ets3b).to receive(:conf).and_return(@conf)
-    allow(@ets3b).to receive(:conf).and_return(
+    e = EverTools::ElasticsearchS3Backup.new
+
+    allow(e).to receive(:pagerduty).and_return(
       object_double(
         'pagerduty',
         trigger: true
       )
     )
+
+    e
   end
 
   describe '#auth' do
     auth_file_content = "user:pass\n"
 
     before(:each) do
-      allow(@ets3b).to receive(:conf).and_return('elasticsearch_auth_file' => '/path/to/file')
+      allow(ets3b).to receive(:elasticsearch_auth_file).and_return('/path/to/file')
     end
 
     it 'should try to load the auth file' do
       expect(File).to receive(:read).and_return(auth_file_content)
-      @ets3b.auth
+      ets3b.auth
     end
 
     it 'should return an array with no newline chars' do
       allow(File).to receive(:read).and_return(auth_file_content)
-      expect(@ets3b.auth).to eq(%w(user pass))
+      expect(ets3b.auth).to eq(%w(user pass))
     end
   end
 
@@ -57,7 +62,7 @@ describe EverTools::ElasticsearchS3Backup do
 
   describe '#es_api' do
     before(:each) do
-      allow(@ets3b).to receive(:logger).and_return(
+      allow(ets3b).to receive(:logger).and_return(
         object_double('logger', debug: true, info: true, warn: true, fatal: true)
       )
     end
@@ -73,13 +78,13 @@ describe EverTools::ElasticsearchS3Backup do
       end
 
       it 'does not call the logger' do
-        expect(@ets3b).to_not receive(:logger)
-        @ets3b.es_api(:get, 'http://goodurl:9200/stuff', foo: 'bar')
+        expect(ets3b).to_not receive(:logger)
+        ets3b.es_api(:get, 'http://goodurl:9200/stuff', foo: 'bar')
       end
 
-      it 'returns the response object' do
+      it 'return the response object' do
         expect(
-          @ets3b.es_api(:get, 'http://goodurl:9200/stuff', foo: 'bar')
+          ets3b.es_api(:get, 'http://goodurl:9200/stuff', foo: 'bar')
         ).to eq(@success_http_object)
       end
     end
@@ -94,31 +99,29 @@ describe EverTools::ElasticsearchS3Backup do
         allow(Unirest).to receive(:send).and_return(@not_found_http_object)
       end
 
-      it 'logs to debug about it' do
-        expect(@ets3b.logger).to receive(:debug)
-        @ets3b.es_api(:get, 'http://notounfurl:9200/stuff', foo: 'bar')
+      it 'log to debug about it' do
+        expect(ets3b.logger).to receive(:debug)
+        ets3b.es_api(:get, 'http://notounfurl:9200/stuff', foo: 'bar')
       end
 
-      it 'returns the response object' do
-        expect(@ets3b.es_api(:get, 'http://notounfurl:9200/stuff', foo: 'bar'))
+      it 'return the response object' do
+        expect(ets3b.es_api(:get, 'http://notounfurl:9200/stuff', foo: 'bar'))
           .to eq(@not_found_http_object)
       end
     end
 
     context '500 response' do
-      before(:each) do
-        @error_http_object = object_double(
-          'http_object',
-          code: 500,
-          body: 'ERROR REPLY BODY'
-        )
-        allow(Unirest).to receive(:send).and_return(@error_http_object)
-      end
-
       it 'raises an exception' do
+        allow(Unirest).to receive(:send).and_return(
+          object_double(
+            'http_object',
+            code: 500,
+            body: 'ERROR REPLY BODY'
+          )
+        )
         test_method = :get
         test_uri = 'http://notounfurl:9200/stuff'
-        expect { @ets3b.es_api(test_method, test_uri, foo: 'bar') }
+        expect { ets3b.es_api(test_method, test_uri, foo: 'bar') }
           .to raise_exception(
             RuntimeError,
             "GET request to #{test_uri} failed (params: {:foo=>\"bar\"})\n" \
@@ -133,18 +136,19 @@ describe EverTools::ElasticsearchS3Backup do
       context 'some random exception (not a timeout)' do
         it 'raises the exception right away' do
           expect(Unirest).to receive(:send).once.and_raise(RuntimeError, 'Request Failed')
-          expect { @ets3b.es_api(:get, 'http://uri') }.to raise_exception(
+          expect { ets3b.es_api(:get, 'http://uri') }.to raise_exception(
             RuntimeError,
             'Request Failed'
           )
         end
       end
+
       context 'connection timeout' do
         it 'retries three times before throwing an exception' do
           expect(Unirest).to receive(:send)
             .exactly(3).times
             .and_raise(RuntimeError, 'Request Timeout')
-          expect { @ets3b.es_api(:get, 'http://uri') }.to raise_exception(
+          expect { ets3b.es_api(:get, 'http://uri') }.to raise_exception(
             RuntimeError,
             'Request Timeout'
           )
@@ -154,39 +158,31 @@ describe EverTools::ElasticsearchS3Backup do
   end
 
   describe '#master?' do
-    @node_name = 'test_node'
-
     context 'node is a master' do
-      before(:each) do
-        allow(@ets3b).to receive(:conf).and_return('node_name' => @node_name)
-        allow(@ets3b).to receive(:es_api).with(:get, "#{@url}/_cat/master").and_return(
+      it 'should return true' do
+        allow(ets3b).to receive(:node_name).and_return(node_name)
+        allow(ets3b).to receive(:es_api).with(:get, "#{es_url}/_cat/master").and_return(
           object_double(
             'http_object',
             code: 200,
-            body: [{ 'node' => @node_name }]
+            body: [{ 'node' => node_name }]
           )
         )
-      end
-
-      it 'should return true' do
-        expect(@ets3b.master?).to eq true
+        expect(ets3b.master?).to eq true
       end
     end
 
     context 'node is not a master' do
-      before(:each) do
-        allow(@ets3b).to receive(:conf).and_return('node_name' => @node_name)
-        allow(@ets3b).to receive(:es_api).with(:get, "#{@url}/_cat/master").and_return(
+      it 'should return false' do
+        allow(ets3b).to receive(:node_name).and_return(node_name)
+        allow(ets3b).to receive(:es_api).with(:get, "#{es_url}/_cat/master").and_return(
           object_double(
             'http_object',
             code: 200,
             body: [{ 'node' => 'some_other_node' }]
           )
         )
-      end
-
-      it 'should return false' do
-        expect(@ets3b.master?).to eq false
+        expect(ets3b.master?).to eq false
       end
     end
   end
@@ -195,103 +191,104 @@ describe EverTools::ElasticsearchS3Backup do
     index_name = 'index_exists_test'
 
     context 'index exists' do
-      before(:each) do
-        allow(@ets3b).to receive(:es_api).with(:get, "#{@url}/#{index_name}").and_return(
+      it 'returns true' do
+        allow(ets3b).to receive(:es_api).with(:get, "#{es_url}/#{index_name}").and_return(
           object_double(
             'http_object',
             code: 200
           )
         )
-      end
-
-      it 'returns true' do
-        expect(@ets3b.index?(index_name)).to eq true
+        expect(ets3b.index?(index_name)).to eq true
       end
     end
 
     context 'index does not exist' do
-      before(:each) do
-        allow(@ets3b).to receive(:es_api).with(:get, "#{@url}/#{index_name}").and_return(
+      it 'returns false' do
+        allow(ets3b).to receive(:es_api).with(:get, "#{es_url}/#{index_name}").and_return(
           object_double(
             'http_object',
             code: 404
           )
         )
-      end
-
-      it 'returns false' do
-        expect(@ets3b.index?(index_name)).to eq false
+        expect(ets3b.index?(index_name)).to eq false
       end
     end
   end
 
   describe '#repo?' do
     context 'repo exists' do
-      before(:each) do
-        allow(@ets3b).to receive(:es_api).and_return(
+      it 'returns true' do
+        allow(ets3b).to receive(:es_api).and_return(
           object_double(
             'http_object',
             code: 200
           )
         )
-      end
-
-      it 'returns true' do
-        expect(@ets3b.repo?).to eq true
+        expect(ets3b.repo?).to eq true
       end
     end
 
     context 'repo does not exist' do
-      before(:each) do
-        allow(@ets3b).to receive(:es_api).and_return(
+      it 'returns false' do
+        allow(ets3b).to receive(:es_api).and_return(
           object_double(
             'http_object',
             code: 404
           )
         )
-      end
-
-      it 'returns false' do
-        expect(@ets3b.repo?).to eq false
+        expect(ets3b.repo?).to eq false
       end
     end
   end
 
   describe '#notify' do
-    node_name = 'test_node'
-
-    before(:each) do
-      @test_exception = object_double(
+    let(:test_exception) do
+      object_double(
         'exception_object',
         message: 'message',
         backtrace: 'backtrace'
       )
-      allow(@ets3b).to receive(:conf).and_return('node_name' => node_name)
     end
 
-    it 'sends a trigger to PagerDuty' do
-      expect(@ets3b.pagerduty).to receive(:trigger).with(
-        'prod Elasticsearch S3 failed',
-        client: node_name,
-        details: "#{@test_exception.message}\n\n#{@test_exception.backtrace}"
-      )
-      @ets3b.notify(@test_exception)
+    before(:each) do
+      allow(ets3b).to receive(:node_name).and_return(node_name)
+    end
+
+    context 'Env: prod' do
+      it 'send a trigger to PagerDuty' do
+        allow(ets3b).to receive(:conf).and_return('env' => 'prod')
+        expect(ets3b.pagerduty).to receive(:trigger).with(
+          'prod Elasticsearch S3 failed',
+          client: node_name,
+          details: "#{test_exception.message}\n\n#{test_exception.backtrace}"
+        )
+      end
+    end
+
+    context 'Env: stage' do
+      it 'does not send a trigger to PagerDuty' do
+        allow(ets3b).to receive(:conf).and_return('env' => 'stage')
+        expect(ets3b.pagerduty).to_not receive(:trigger)
+      end
+    end
+
+    after(:each) do
+      ets3b.notify(test_exception)
     end
   end
 
   describe '#index_item' do
     context 'shard has some other problem' do
-      before(:each) do
-        error_http_object = object_double(
-          'http_object',
-          code: 503,
-          body: 'EVERYTHING IS HORRIBLE'
-        )
-        allow(Unirest).to receive(:send).and_return(error_http_object)
-      end
-
       it 'returns false' do
-        expect { @ets3b.index_item('test_index', 0) }
+        allow(Unirest).to receive(:send).and_return(
+          object_double(
+            'http_object',
+            code: 503,
+            body: 'EVERYTHING IS HORRIBLE'
+          )
+        )
+
+        expect { ets3b.index_item('test_index', 0) }
           .to raise_exception(
             RuntimeError,
             "GET request to http://localhost:9200/test_index/dummy/0 failed (params: {})\n" \
@@ -306,80 +303,79 @@ describe EverTools::ElasticsearchS3Backup do
   describe '#index_online?' do
     context 'index shard exists' do
       context "but isn't ready" do
-        before(:each) do
-          http_object = object_double(
-            'http_object',
-            code: 200,
-            body: {
-              'indices' => {
-                'restore_test' => {
-                  'shards' => {
-                    '0' => [
-                      { 'state' => 'STARTED' },
-                      { 'state' => 'STARTED' }
-                    ],
-                    '1' => [
-                      { 'state' => 'STARTED' },
-                      { 'state' => 'RECOVERING' }
-                    ]
+        it 'returns false' do
+          allow(Unirest).to receive(:send).and_return(
+            object_double(
+              'http_object',
+              code: 200,
+              body: {
+                'indices' => {
+                  'restore_test' => {
+                    'shards' => {
+                      '0' => [
+                        { 'state' => 'STARTED' },
+                        { 'state' => 'STARTED' }
+                      ],
+                      '1' => [
+                        { 'state' => 'STARTED' },
+                        { 'state' => 'RECOVERING' }
+                      ]
+                    }
                   }
                 }
               }
-            }
+            )
           )
-          expect(Unirest).to receive(:send).and_return(http_object)
-        end
-
-        it 'returns false' do
-          expect(@ets3b.index_online?('restore_test')).to eq(false)
+          expect(ets3b.index_online?('restore_test')).to eq(false)
         end
       end
 
       context 'and is ready' do
-        before(:each) do
-          http_object = object_double(
-            'http_object',
-            code: 200,
-            body: {
-              'indices' => {
-                'restore_test' => {
-                  'shards' => {
-                    '0' => [{ 'state' => 'STARTED' }],
-                    '1' => [{ 'state' => 'STARTED' }]
+        it 'returns true' do
+          allow(Unirest).to receive(:send).and_return(
+            object_double(
+              'http_object',
+              code: 200,
+              body: {
+                'indices' => {
+                  'restore_test' => {
+                    'shards' => {
+                      '0' => [{ 'state' => 'STARTED' }],
+                      '1' => [{ 'state' => 'STARTED' }]
+                    }
                   }
                 }
               }
-            }
+            )
           )
-          expect(Unirest).to receive(:send).and_return(http_object)
-        end
-
-        it 'returns true' do
-          expect(@ets3b.index_online?('restore_test')).to eq(true)
+          expect(ets3b.index_online?('restore_test')).to eq(true)
         end
       end
     end
   end
 
   describe '#remove_expired_backups' do
+    let(:old_repo) { 6.months.ago.strftime('%m-%Y') }
+    let(:recent_repo) { 1.months.ago.strftime('%m-%Y') }
+    let(:repos) { [old_repo, recent_repo] }
+
     before(:each) do
-      allow(@ets3b).to receive(:logger).and_return(
+      allow(ets3b).to receive(:logger).and_return(
         object_double('logger', debug: true, info: true, warn: true, fatal: true)
       )
-      @old_repo = 6.months.ago.strftime('%m-%Y')
-      @recent_repo = 1.months.ago.strftime('%m-%Y')
-      @repos = [@old_repo, @recent_repo]
-      allow(@ets3b).to receive(:dated_repos).and_return(@repos)
+      allow(ets3b).to receive(:dated_repos).and_return(repos)
     end
 
     it 'deletes backups more than 3 months old' do
-      expect(@ets3b).to receive(:es_api).with(:delete, "#{@url}/_snapshot/#{@old_repo}")
-      @ets3b.remove_expired_backups
+      expect(ets3b).to receive(:es_api).with(:delete, "#{es_url}/_snapshot/#{old_repo}")
     end
 
     it 'does not delete backups less than 3 months old' do
-      expect(@ets3b).to_not receive(:es_api).with(:delete, "#{@url}/_snapshot/#{@recent_repo}")
-      @ets3b.remove_expired_backups
+      expect(ets3b).to_not receive(:es_api).with(:delete, "#{es_url}/_snapshot/#{recent_repo}")
+    end
+
+    after(:each) do
+      ets3b.remove_expired_backups
     end
   end
 end
