@@ -1,28 +1,36 @@
 # ElasticsearchS3Backup
 
-Welcome to your new gem! In this directory, you'll find the files you need to be able to package up your Ruby library into a gem. Put your Ruby code in the file `lib/elasticsearch_s3_backup`. To experiment with that code, run `bin/console` for an interactive prompt.
-
-TODO: Delete this and the text above, and describe your gem
+This gem creates a backup of your ElasticSearch cache and uploads it to S3.
 
 ## Installation
 
-Add this line to your application's Gemfile:
-
-```ruby
-gem 'elasticsearch_s3_backup'
-```
-
-And then execute:
-
-    $ bundle
-
-Or install it yourself as:
+Install it using:
 
     $ gem install elasticsearch_s3_backup
 
+## Configuration
+
+Create a YAML file called `/etc/s3_backup.yml` and give it the following contents:
+
+    ---
+    notification_email: @@NOTIFICATION_EMAIL_ADDRESS@@
+    test_size: 100
+    log: "/var/log/s3_backup/s3_backup.log"
+    new_repo_params:
+      bucket: @@BACKUPS_S3_BUCKET@@
+      max_snapshot_bytes_per_sec: 100mb
+      max_restore_bytes_per_sec: 500mb
+    env: stage
+    pagerduty_api_key: @@YOUR_PAGERDUTY_API_KEY@@
+    node_name: @@THIS_NODE'S_NAME@@
+    elasticsearch_auth_file: "/usr/local/elasticsearch/password"
+    cluster_name: @@YOUR_CLUSTER_NAME@@
+
 ## Usage
 
-TODO: Write usage instructions here
+Just run the command:
+
+    $ es_s3_backup
 
 ## Development
 
@@ -32,8 +40,7 @@ To install this gem onto your local machine, run `bundle exec rake install`. To 
 
 ## Contributing
 
-Bug reports and pull requests are welcome on GitHub at https://github.com/[USERNAME]/elasticsearch_s3_backup.
-
+Bug reports and pull requests are welcome on GitHub at https://github.com/evertrue/elasticsearch_s3_backup.
 
 ## License
 
