@@ -14,7 +14,7 @@ describe EverTools::ElasticsearchS3Backup do
       'test_size' => 100,
       'log' => './s3_backup.log',
       'new_repo_params' => {
-        'bucket' => 'backups.evertrue.com',
+        'bucket' => 'backups.s3.bucket',
         'max_snapshot_bytes_per_sec' => '100mb',
         'max_restore_bytes_per_sec' => '500mb'
       },
