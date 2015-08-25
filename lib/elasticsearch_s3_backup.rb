@@ -2,7 +2,6 @@ require 'elasticsearch_s3_backup/version'
 require 'active_support/time'
 require 'unirest'
 require 'logger'
-require 'faker'
 require 'pagerduty'
 require 'yaml'
 require 'sentry-raven'
@@ -21,7 +20,7 @@ module EverTools
                    :elasticsearch_auth_file,
                    :cluster_name
 
-    attr_reader :conf
+    attr_reader :conf, :backup_repo
 
     def pagerduty
       @pagerduty ||= Pagerduty.new pagerduty_api_key
@@ -42,67 +41,55 @@ module EverTools
       @url = 'http://localhost:9200'
 
       test_backup_timestamp = Time.now.to_i
-      @backup_index  = "backup_test_#{test_backup_timestamp}"
-      @restore_index = "restore_test_#{test_backup_timestamp}"
+      @backup_index         = "backup_test_#{test_backup_timestamp}"
+      @restore_index        = "restore_test_#{test_backup_timestamp}"
 
-      now       = Time.new.utc
-      @monthly  = now.strftime '%m-%Y'
-      @datetime = now.strftime '%m-%d_%H%M'
-
-      @monthly_snap_url = [@url, '_snapshot', @monthly].join('/')
+      now           = Time.new.utc
+      @backup_repo  = now.strftime '%m-%Y'
+      @datetime     = now.strftime '%m-%d_%H%M'
 
       @backup_timeout = 1.hour
     end
 
     def logger
-      @logger ||= Logger.new(@conf['log']).tap do |l|
-        l.level = Logger::INFO
-        l.progname = 's3_backup'
-        l.formatter = proc do |severity, datetime, progname, msg|
-          "#{datetime.utc} [#{progname}] #{severity}: #{msg}\n"
-        end
-      end
+      @logger ||= Logger.new(conf['log']).tap { |l| l.progname = 's3_backup' }
     end
 
     # rubocop:disable Metrics/AbcSize
-    def es_api(method, uri, params = {})
-      tries = 3
-      begin
-        r = Unirest.send(method, uri, params)
-        case r.code
-        when 200..299
-          return r
-        when 400..499
-          logger.debug "#{method} request to #{uri} received #{r.code} (params: #{params.inspect})\n" \
-                      "Body:\n" \
-                      "#{r.body}\n"
-          return r
-        end
-        # byebug
-        fail "#{method.upcase} request to #{uri} failed (params: #{params.inspect})\n" \
-             "Response code: #{r.code}\n" \
-             "Body:\n" \
-             "#{r.body}\n"
-      rescue RuntimeError => e
-        tries -= 1
-        retry if e.message == 'Request Timeout' && tries > 0
-        raise e
-      end
-    end
+    # def es_api(method, uri, params = {})
+    #   tries = 3
+    #   begin
+    #     r = Unirest.send(method, uri, params)
+    #     case r.code
+    #     when 200..299
+    #       return r
+    #     when 400..499
+    #       logger.debug "#{method} request to #{uri} received #{r.code} (params: #{params.inspect})\n" \
+    #                   "Body:\n" \
+    #                   "#{r.body}\n"
+    #       return r
+    #     end
+    #     # byebug
+    #     fail "#{method.upcase} request to #{uri} failed (params: #{params.inspect})\n" \
+    #          "Response code: #{r.code}\n" \
+    #          "Body:\n" \
+    #          "#{r.body}\n"
+    #   rescue RuntimeError => e
+    #     tries -= 1
+    #     retry if e.message == 'Request Timeout' && tries > 0
+    #     raise e
+    #   end
+    # end
     # rubocop:enable Metrics/AbcSize
 
+    def es_api
+      @es_api ||= begin
+        Elasticsearch::Client.new
+      end
+    end
+
     def master?
-      es_api(:get, "#{@url}/_cat/master").body[0]['node'] == node_name
-    end
-
-    # Check if an index exists
-    def index?(uri)
-      es_api(:get, "#{@url}/#{uri}").code == 200
-    end
-
-    # Check if a backup repo exists
-    def repo?
-      es_api(:get, @monthly_snap_url).code == 200
+      es_api.nodes['nodes'].info[es_api.cluster.state['master_node']]['node'] == node_name
     end
 
     def notify(e)
@@ -118,20 +105,12 @@ module EverTools
     end
 
     def insert_test_data
-      # Generate some test data using Faker
-      #
-      # Uses Bitcoin addresses for their random, hash-like nature
-      # Creates the `backup_test` index if necessary
-      # Updates the set of `dummy` documents in the `backup_test` on every run
-
-      logger.info 'Generating test data using Faker…'
+      logger.info 'Generating test data using math…'
       test_size.times do |i|
         es_api(
           :put,
           "#{@url}/#{@backup_index}/dummy/#{i}",
-          parameters: {
-            test_value: Faker::Bitcoin.address
-          }.to_json
+          parameters: { test_value: i * 4**64 }.to_json
         )
       end
     end
@@ -220,7 +199,7 @@ module EverTools
 
     def make_new_backup
       # Make a backup (full on new month, incremental otherwise)
-      logger.info "Starting a new backup (#{@monthly_snap_url}/#{@datetime})…"
+      logger.info "Starting a new backup (#{backup_repo}/#{@datetime})…"
       es_api :put, "#{@monthly_snap_url}/#{@datetime}"
 
       # Give the new backup time to show up
@@ -303,12 +282,12 @@ module EverTools
 
       # Remove the previous `restore_test` index, to avoid a race condition
       # with checking the restored copy of this index
-      delete_index @restore_index if index? @restore_index
+      delete_index @restore_index if es_api.indices.exists(index: @restore_index)
 
       insert_test_data
 
       # Create a new repo if none exists (typically at beginning of month)
-      create_repo unless repo?
+      create_repo unless es_api.snapshot.get_repository[backup_repo]
       make_new_backup
       restore_test_index
 
