@@ -39,7 +39,7 @@ describe EverTools::ElasticsearchS3Backup do
     e
   end
 
-  describe '#auth' do
+  describe '.auth' do
     auth_file_content = "user:pass\n"
 
     before(:each) do
@@ -57,10 +57,10 @@ describe EverTools::ElasticsearchS3Backup do
     end
   end
 
-  # describe '#logger' do
+  # describe '.logger' do
   # end
 
-  describe '#es_api' do
+  describe '.es_api' do
     before(:each) do
       allow(ets3b).to receive(:logger).and_return(
         object_double('logger', debug: true, info: true, warn: true, fatal: true)
@@ -157,7 +157,7 @@ describe EverTools::ElasticsearchS3Backup do
     end
   end
 
-  describe '#master?' do
+  describe '.master?' do
     context 'node is a master' do
       it 'should return true' do
         allow(ets3b).to receive(:node_name).and_return(node_name)
@@ -187,7 +187,7 @@ describe EverTools::ElasticsearchS3Backup do
     end
   end
 
-  describe '#index?' do
+  describe '.index?' do
     index_name = 'index_exists_test'
 
     context 'index exists' do
@@ -215,7 +215,7 @@ describe EverTools::ElasticsearchS3Backup do
     end
   end
 
-  describe '#repo?' do
+  describe '.repo?' do
     context 'repo exists' do
       it 'returns true' do
         allow(ets3b).to receive(:es_api).and_return(
@@ -241,7 +241,7 @@ describe EverTools::ElasticsearchS3Backup do
     end
   end
 
-  describe '#notify' do
+  describe '.notify' do
     let(:test_exception) do
       object_double(
         'exception_object',
@@ -277,7 +277,7 @@ describe EverTools::ElasticsearchS3Backup do
     end
   end
 
-  describe '#index_item' do
+  describe '.index_item' do
     context 'shard has some other problem' do
       it 'returns false' do
         allow(Unirest).to receive(:send).and_return(
@@ -300,7 +300,7 @@ describe EverTools::ElasticsearchS3Backup do
     end
   end
 
-  describe '#index_online?' do
+  describe '.index_online?' do
     context 'index shard exists' do
       context "but isn't ready" do
         it 'returns false' do
@@ -354,7 +354,7 @@ describe EverTools::ElasticsearchS3Backup do
     end
   end
 
-  describe '#remove_expired_backups' do
+  describe '.remove_expired_backups' do
     let(:old_repo) { 6.months.ago.strftime('%m-%Y') }
     let(:recent_repo) { 1.months.ago.strftime('%m-%Y') }
     let(:repos) { [old_repo, recent_repo] }
