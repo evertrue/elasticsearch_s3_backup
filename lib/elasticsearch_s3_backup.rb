@@ -22,74 +22,23 @@ module EverTools
 
     attr_reader :conf, :backup_repo
 
-    def pagerduty
-      @pagerduty ||= Pagerduty.new pagerduty_api_key
-    end
-
-    def auth
-      @auth ||= File.read(elasticsearch_auth_file).strip.split ':'
-    end
-
     def initialize
       @conf = OpenStruct.new(YAML.load_file('/etc/s3_backup.yml'))
       Raven.configure { config.dsn = sentry_dsn } if sentry_dsn
 
-      Unirest.default_header 'Accept', 'application/json'
-      Unirest.default_header 'Content-Type', 'application/json'
-      Unirest.timeout 30
-
-      @url = 'http://localhost:9200'
-
-      test_backup_timestamp = Time.now.to_i
-      @backup_index         = "backup_test_#{test_backup_timestamp}"
-      @restore_index        = "restore_test_#{test_backup_timestamp}"
-
-      now           = Time.new.utc
-      @backup_repo  = now.strftime '%m-%Y'
-      @datetime     = now.strftime '%m-%d_%H%M'
-
-      @backup_timeout = 1.hour
+      now                 = Time.new.utc
+      @backup_test_index  = "backup_test_#{now.to_i}"
+      @restore_test_index = "restore_test_#{now.to_i}"
+      @backup_repo        = now.strftime '%m-%Y'
+      @snapshot_label     = now.strftime '%m-%d_%H%M'
     end
 
     def logger
       @logger ||= Logger.new(conf['log']).tap { |l| l.progname = 's3_backup' }
     end
 
-    # rubocop:disable Metrics/AbcSize
-    # def es_api(method, uri, params = {})
-    #   tries = 3
-    #   begin
-    #     r = Unirest.send(method, uri, params)
-    #     case r.code
-    #     when 200..299
-    #       return r
-    #     when 400..499
-    #       logger.debug "#{method} request to #{uri} received #{r.code} (params: #{params.inspect})\n" \
-    #                   "Body:\n" \
-    #                   "#{r.body}\n"
-    #       return r
-    #     end
-    #     # byebug
-    #     fail "#{method.upcase} request to #{uri} failed (params: #{params.inspect})\n" \
-    #          "Response code: #{r.code}\n" \
-    #          "Body:\n" \
-    #          "#{r.body}\n"
-    #   rescue RuntimeError => e
-    #     tries -= 1
-    #     retry if e.message == 'Request Timeout' && tries > 0
-    #     raise e
-    #   end
-    # end
-    # rubocop:enable Metrics/AbcSize
-
-    def es_api
-      @es_api ||= begin
-        Elasticsearch::Client.new
-      end
-    end
-
-    def master?
-      es_api.nodes['nodes'].info[es_api.cluster.state['master_node']]['node'] == node_name
+    def pagerduty
+      @pagerduty ||= Pagerduty.new pagerduty_api_key
     end
 
     def notify(e)
@@ -104,49 +53,55 @@ module EverTools
       Raven.capture_exception(e) if sentry_dsn
     end
 
-    def insert_test_data
-      logger.info 'Generating test data using math…'
-      test_size.times do |i|
-        es_api(
-          :put,
-          "#{@url}/#{@backup_index}/dummy/#{i}",
-          parameters: { test_value: i * 4**64 }.to_json
-        )
+    def auth
+      File.read(elasticsearch_auth_file).strip
+    end
+
+    def es_api
+      @es_api ||= begin
+        es_host = @conf['es_host'] || 'localhost'
+        Elasticsearch::Client.new URI "http://#{auth}@#{es_host}:9200"
       end
     end
 
-    def delete_index(index)
-      logger.info "Deleting index: #{index}"
-      es_api(
-        :delete,
-        "#{@url}/#{index}",
-        auth: { user: auth.first, password: auth.last }
-      )
+    def master?
+      es_api.nodes['nodes'].info[es_api.cluster.state['master_node']]['node'] == node_name
+    end
+
+    def insert_test_data
+      logger.info 'Generating test data using math…'
+      test_size.times do |i|
+        es_api.create(
+          index: @backup_test_index,
+          type: 'dummy',
+          id: i,
+          body: { test_value: i * 4**Time.now.sec }
+        )
+      end
     end
 
     def create_repo
       new_repo_params = new_repo_params.merge(
         type: 's3',
         settings: {
-          base_path: "/elasticsearch/#{cluster_name}/#{conf['env']}/#{@monthly}",
+          base_path: "/elasticsearch/#{cluster_name}/#{conf['env']}/#{@backup_repo}",
           server_side_encryption: true
         }
       )
 
       logger.info 'Creating a new monthly ES backup repo…'
-      es_api(
-        :put,
-        @monthly_snap_url,
-        parameters: new_repo_params.to_json
-      )
+      es_api.snapshot.create_repository repository: @backup_repo,
+                                        body: new_repo_params
     end
 
     def valid_date?(date)
+      # rubocop:disable Style/RescueModifier
       Time.strptime(date, '%m-%Y') rescue false
+      # rubocop:enable Style/RescueModifier
     end
 
     def dated_repos
-      es_api(:get, "#{@url}/_snapshot").body.keys.select { |r| valid_date? r }
+      es_api.snapshot.get_repository.keys.select { |r| valid_date? r }
     end
 
     def remove_expired_backups
@@ -154,106 +109,42 @@ module EverTools
       logger.info "Removing backups older than #{3.months.ago.strftime '%m-%Y'}"
       dated_repos.select { |b| Time.strptime(b, '%m-%Y') < 3.months.ago }.each do |repo|
         logger.info "Removing #{repo}"
-        es_api :delete, "#{@url}/_snapshot/#{repo}"
+        es_api.snapshot.delete_repository repository: repo
       end
     end
 
-    # rubocop:disable Metrics/AbcSize
-    def snapshot
-      backup_uri = "#{@monthly_snap_url}/#{@datetime}"
-      status_req = es_api :get, "#{backup_uri}/_status"
-      if status_req.code == 404 ||
-         status_req.body['snapshots'].empty?
-        fail "Could not find the backup I just created (#{backup_uri})"
-      end
-      snapshot = status_req.body['snapshots'].first
-      logger.info "Backup state: #{snapshot['state']} " \
-                  "(finished shard #{snapshot['shards_stats']['done']} of " \
-                  "#{snapshot['shards_stats']['total']})"
-    end
-    # rubocop:enable Metrics/AbcSize
-
-    def backup_complete?
-      case snapshot['state']
-      when 'IN_PROGRESS', 'STARTED'
-        return false
-      when 'SUCCESS'
-        return true
-      end
-      fail "Backup failed!\n" \
-           "State: #{snapshot['state']}\n" \
-           "Response Body: #{status_req.body}"
-    end
-
-    def verify_create!
-      # Check the status of the backup for up to an hour
-      backup_start_time = Time.now.utc
-      until Time.now.utc > (backup_start_time + @backup_timeout)
-        return true if backup_complete?
-        # Don't hammer the status endpoint
-        sleep 15
-      end
-
-      fail 'Create timed out'
-    end
-
-    def make_new_backup
+    def create_snapshot
       # Make a backup (full on new month, incremental otherwise)
-      logger.info "Starting a new backup (#{backup_repo}/#{@datetime})…"
-      es_api :put, "#{@monthly_snap_url}/#{@datetime}"
-
-      # Give the new backup time to show up
-      sleep 5
-
-      verify_create!
+      logger.info "Starting a new backup (#{backup_repo}/#{@snapshot_label})…"
+      r = es_api.snapshot.create repository: @backup_repo,
+                                 snapshot: @snapshot_label,
+                                 wait_for_completion: true
+      logger.info 'Snapshot complete. Time: ' \
+                  "#{r['snapshot']['duration_in_millis']}. " \
+                  "Results: #{r['snapshot']['shards'].inspect}"
+      fail "Snapshot failed! #{r.inspect}" if r['snapshot']['failures'].any?
     end
 
     def restore_test_index
       # Restore just the backup_test index to a new index
       logger.info 'Restoring the backup_test index…'
-      es_api(
-        :post,
-        "#{@monthly_snap_url}/#{@datetime}/_restore",
-        parameters: {
-          indices: @backup_index,
-          rename_pattern: @backup_index,
-          rename_replacement: @restore_index
-        }.to_json
-      )
-      verify_restored_index!
-    end
-
-    def index_shards(index)
-      r = es_api(:get, "#{@url}/#{index}/_status")
-      fail "Index #{index} not found" if r.code == 404
-      r.body.fetch('indices', {}).fetch(index, {})['shards']
-    end
-
-    def index_online?(index)
-      shards = index_shards(index)
-      shards && shards.select { |_k, v| v.find { |n| n['state'] != 'STARTED' } }.empty?
+      es_api.snapshot.restore repository: @backup_repo,
+                              snapshot: @snapshot_label,
+                              wait_for_completion: true,
+                              body: {
+                                indices: @backup_test_index,
+                                rename_pattern: @backup_test_index,
+                                rename_replacement: @restore_test_index
+                              }
     end
 
     def index_item(index, id)
-      es_api(:get, "#{@url}/#{index}/dummy/#{id}").body
-    end
-
-    def wait_for_index(index)
-      until index_online? index
-        logger.info 'Waiting for restored index to be available…'
-        sleep 1
-      end
+      es_api.get(index: index, type: 'dummy', id: id)['_source']['test_value']
     end
 
     def compare_index_item!(i)
-      # Loop until the restored version is available
-      until index_item(@restore_index, i)['found']
-        logger.info 'Waiting for restored index to be available…'
-        sleep 1
-      end
-
-      backup_item  = index_item(@backup_index, i)['_source']['test_value']
-      restore_item = index_item(@restore_index, i)['_source']['test_value']
+      backup_item  = index_item(@backup_test_index, i)
+      restore_item = index_item(@restore_test_index, i)
 
       (backup_item == restore_item) ||
         fail("Item #{i} in test restore doesn’t match.\n" \
@@ -261,15 +152,10 @@ module EverTools
              "Restored: #{restore_item}")
     end
 
-    def verify_restored_index!
-      # Compare each doc in the original backup_test index to the restored index
-
-      logger.info "Verifying the newly-restored #{@backup_index}…"
-      wait_for_index @restore_index
-
-      test_size.times { |i| compare_index_item! i }
-
-      logger.info 'Successfully verified the test data!'
+    def delete_test_indexes
+      [@restore_test_index, @backup_test_index].each do |test_index|
+        es_api.indices.delete index: test_index
+      end
     end
 
     # rubocop:disable Metrics/AbcSize, Lint/RescueException
@@ -280,16 +166,17 @@ module EverTools
         exit 0
       end
 
-      # Remove the previous `restore_test` index, to avoid a race condition
-      # with checking the restored copy of this index
-      delete_index @restore_index if es_api.indices.exists(index: @restore_index)
-
       insert_test_data
 
       # Create a new repo if none exists (typically at beginning of month)
       create_repo unless es_api.snapshot.get_repository[backup_repo]
-      make_new_backup
+      create_snapshot
       restore_test_index
+      # Compare each doc in the original backup_test index to the restored index
+      logger.info "Verifying the newly-restored #{@backup_test_index}…"
+      test_size.times { |i| compare_index_item! i }
+      logger.info 'Successfully verified the test data!'
+      delete_test_indexes
 
       remove_expired_backups
       logger.info 'Finished'
