@@ -137,7 +137,7 @@ module EverTools
                                  wait_for_completion: true
       fail "Snapshot failed! #{r.inspect}" if r['snapshot']['failures'].any?
       logger.info 'Snapshot complete. Time: ' \
-                  "#{r['snapshot']['duration_in_millis']}. " \
+                  "#{r['snapshot']['duration_in_millis'].to_i / 1000} seconds " \
                   "Results: #{r['snapshot']['shards'].inspect}"
     end
 
