@@ -89,13 +89,13 @@ module EverTools
       new_repo_params = new_repo_params.merge(
         type: 's3',
         settings: {
-          base_path: "/elasticsearch/#{cluster_name}/#{conf['env']}/#{@backup_repo}",
+          base_path: "/elasticsearch/#{cluster_name}/#{conf['env']}/#{backup_repo}",
           server_side_encryption: true
         }
       )
 
       logger.info 'Creating a new monthly ES backup repo…'
-      es_api.snapshot.create_repository repository: @backup_repo,
+      es_api.snapshot.create_repository repository: backup_repo,
                                         body: new_repo_params
     end
 
@@ -121,7 +121,7 @@ module EverTools
     def create_snapshot
       # Make a backup (full on new month, incremental otherwise)
       logger.info "Starting a new backup (#{backup_repo}/#{snapshot_label})…"
-      r = es_api.snapshot.create repository: @backup_repo,
+      r = es_api.snapshot.create repository: backup_repo,
                                  snapshot: snapshot_label,
                                  wait_for_completion: true
       logger.info 'Snapshot complete. Time: ' \
@@ -133,7 +133,7 @@ module EverTools
     def restore_test_index
       # Restore just the backup_test index to a new index
       logger.info 'Restoring the backup_test index…'
-      es_api.snapshot.restore repository: @backup_repo,
+      es_api.snapshot.restore repository: backup_repo,
                               snapshot: snapshot_label,
                               wait_for_completion: true,
                               body: {
