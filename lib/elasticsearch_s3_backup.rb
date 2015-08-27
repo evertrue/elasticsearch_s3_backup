@@ -66,7 +66,7 @@ module EverTools
     end
 
     def master?
-      es_api.nodes.info['nodes'][es_api.cluster.state['master_node']]['node'] == node_name
+      es_api.nodes.info['nodes'][es_api.cluster.state['master_node']]['name'] == node_name
     end
 
     def pseudo_random_string

@@ -66,10 +66,10 @@ describe EverTools::ElasticsearchS3Backup do
         info: {
           'nodes' => {
             master_node_id => {
-              'node' => node_name
+              'name' => node_name
             },
             'some_other_node' => {
-              'node' => 'some_other_node_name'
+              'name' => 'some_other_node_name'
             }
           }
         }
