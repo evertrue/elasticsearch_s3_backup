@@ -61,7 +61,12 @@ module EverTools
     def es_api
       @es_api ||= begin
         es_host = @conf['es_host'] || 'localhost'
-        Elasticsearch::Client.new host: "http://#{auth}@#{es_host}:9200"
+        Elasticsearch::Client.new host: "http://#{auth}@#{es_host}:9200",
+                                  transport_options: {
+                                    request: {
+                                      timeout: 1200
+                                    }
+                                  }
       end
     end
 
