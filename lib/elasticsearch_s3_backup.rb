@@ -25,7 +25,7 @@ module EverTools
 
     def initialize
       @conf = OpenStruct.new(YAML.load_file('/etc/s3_backup.yml'))
-      Raven.configure { config.dsn = sentry_dsn } if sentry_dsn
+      Raven.configure { |config| config.dsn = sentry_dsn } if sentry_dsn
 
       now                 = Time.new.utc
       @backup_test_index  = "backup_test_#{now.to_i}"
