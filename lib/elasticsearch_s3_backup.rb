@@ -21,7 +21,7 @@ module EverTools
                    :elasticsearch_auth_file,
                    :cluster_name
 
-    attr_reader :conf, :backup_repo
+    attr_reader :conf, :backup_repo, :snapshot_label
 
     def initialize
       @conf = OpenStruct.new(YAML.load_file('/etc/s3_backup.yml'))
@@ -120,9 +120,9 @@ module EverTools
 
     def create_snapshot
       # Make a backup (full on new month, incremental otherwise)
-      logger.info "Starting a new backup (#{backup_repo}/#{@snapshot_label})…"
+      logger.info "Starting a new backup (#{backup_repo}/#{snapshot_label})…"
       r = es_api.snapshot.create repository: @backup_repo,
-                                 snapshot: @snapshot_label,
+                                 snapshot: snapshot_label,
                                  wait_for_completion: true
       logger.info 'Snapshot complete. Time: ' \
                   "#{r['snapshot']['duration_in_millis']}. " \
@@ -134,7 +134,7 @@ module EverTools
       # Restore just the backup_test index to a new index
       logger.info 'Restoring the backup_test index…'
       es_api.snapshot.restore repository: @backup_repo,
-                              snapshot: @snapshot_label,
+                              snapshot: snapshot_label,
                               wait_for_completion: true,
                               body: {
                                 indices: @backup_test_index,
