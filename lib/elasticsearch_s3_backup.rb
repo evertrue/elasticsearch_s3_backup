@@ -200,7 +200,7 @@ module EverTools
     rescue Exception => e # Need to rescue "Exception" so that Sentry gets it
       notify e
       logger.fatal e.message
-      logger.fatal e.backtrace
+      logger.fatal e.backtrace.join("\n")
       raise e
     end
     # rubocop:enable Metrics/AbcSize, Lint/RescueException
