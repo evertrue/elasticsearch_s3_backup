@@ -167,7 +167,7 @@ module EverTools
     def run
       unless master?
         logger.info 'This node is not the currently elected master. Exiting.'
-        exit 0
+        exit
       end
 
       insert_test_data
@@ -184,6 +184,14 @@ module EverTools
 
       remove_expired_backups
       logger.info 'Finished'
+    rescue Interrupt
+      puts "Received #{e.class}"
+      exit 99
+    rescue SignalException => e
+      logger.info "Received: #{e.signm} (#{e.signo})"
+      exit 2
+    rescue SystemExit => e
+      exit e.status
     rescue Exception => e # Need to rescue "Exception" so that Sentry gets it
       notify e
       logger.fatal e.message
