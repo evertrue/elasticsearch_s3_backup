@@ -69,6 +69,10 @@ module EverTools
       es_api.nodes['nodes'].info[es_api.cluster.state['master_node']]['node'] == node_name
     end
 
+    def pseudo_random_string
+      'a' + rand(10**100).to_s
+    end
+
     def insert_test_data
       logger.info 'Generating test data using math…'
       test_size.times do |i|
@@ -76,7 +80,7 @@ module EverTools
           index: @backup_test_index,
           type: 'dummy',
           id: i,
-          body: { test_value: i * 4**Time.now.sec }
+          body: { test_value: pseudo_random_string }
         )
       end
     end
