@@ -5,14 +5,12 @@ describe EverTools::ElasticsearchS3Backup do
     expect(EverTools::ElasticsearchS3Backup::VERSION).not_to be nil
   end
 
-  let(:es_url) { 'http://localhost:9200' }
   let(:node_name) { 'test_node' }
 
   let(:ets3b) do
     conf = {
       'env' => 'dev',
       'pagerduty_api_key' => 'BOGUS_API_KEY',
-      'notification_email' => 'testemail@domain.com',
       'test_size' => 100,
       'log' => './s3_backup.log',
       'new_repo_params' => {
@@ -53,119 +51,44 @@ describe EverTools::ElasticsearchS3Backup do
 
     it 'should return an array with no newline chars' do
       allow(File).to receive(:read).and_return(auth_file_content)
-      expect(ets3b.auth).to eq(%w(user pass))
+      expect(ets3b.auth).to eq(auth_file_content.strip)
     end
   end
 
   # describe '.logger' do
   # end
 
-  describe '.es_api' do
-    before(:each) do
-      allow(ets3b).to receive(:logger).and_return(
-        object_double('logger', debug: true, info: true, warn: true, fatal: true)
+  describe '.master?' do
+    let(:master_node_id) { 'AbCdEfGh012345' }
+    let(:nodes_object) do
+      object_double(
+        'nodes_object',
+        info: {
+          'nodes' => {
+            master_node_id => {
+              'node' => node_name
+            },
+            'some_other_node' => {
+              'node' => 'some_other_node_name'
+            }
+          }
+        }
       )
     end
 
-    context '200 response' do
-      before(:each) do
-        @success_http_object = object_double(
-          'http_object',
-          code: 200,
-          body: 'SUCCESSFUL REPLY BODY'
-        )
-        allow(Unirest).to receive(:send).and_return(@success_http_object)
-      end
-
-      it 'does not call the logger' do
-        expect(ets3b).to_not receive(:logger)
-        ets3b.es_api(:get, 'http://goodurl:9200/stuff', foo: 'bar')
-      end
-
-      it 'return the response object' do
-        expect(
-          ets3b.es_api(:get, 'http://goodurl:9200/stuff', foo: 'bar')
-        ).to eq(@success_http_object)
-      end
-    end
-
-    context '400 response' do
-      before(:each) do
-        @not_found_http_object = object_double(
-          'http_object',
-          code: 400,
-          body: 'NOT FOUND REPLY BODY'
-        )
-        allow(Unirest).to receive(:send).and_return(@not_found_http_object)
-      end
-
-      it 'log to debug about it' do
-        expect(ets3b.logger).to receive(:debug)
-        ets3b.es_api(:get, 'http://notounfurl:9200/stuff', foo: 'bar')
-      end
-
-      it 'return the response object' do
-        expect(ets3b.es_api(:get, 'http://notounfurl:9200/stuff', foo: 'bar'))
-          .to eq(@not_found_http_object)
-      end
-    end
-
-    context '500 response' do
-      it 'raises an exception' do
-        allow(Unirest).to receive(:send).and_return(
-          object_double(
-            'http_object',
-            code: 500,
-            body: 'ERROR REPLY BODY'
-          )
-        )
-        test_method = :get
-        test_uri = 'http://notounfurl:9200/stuff'
-        expect { ets3b.es_api(test_method, test_uri, foo: 'bar') }
-          .to raise_exception(
-            RuntimeError,
-            "GET request to #{test_uri} failed (params: {:foo=>\"bar\"})\n" \
-            "Response code: 500\n" \
-            "Body:\n" \
-            "ERROR REPLY BODY\n"
-          )
-      end
-    end
-
-    context 'exception response' do
-      context 'some random exception (not a timeout)' do
-        it 'raises the exception right away' do
-          expect(Unirest).to receive(:send).once.and_raise(RuntimeError, 'Request Failed')
-          expect { ets3b.es_api(:get, 'http://uri') }.to raise_exception(
-            RuntimeError,
-            'Request Failed'
-          )
-        end
-      end
-
-      context 'connection timeout' do
-        it 'retries three times before throwing an exception' do
-          expect(Unirest).to receive(:send)
-            .exactly(3).times
-            .and_raise(RuntimeError, 'Request Timeout')
-          expect { ets3b.es_api(:get, 'http://uri') }.to raise_exception(
-            RuntimeError,
-            'Request Timeout'
-          )
-        end
-      end
-    end
-  end
-
-  describe '.master?' do
     context 'node is a master' do
       it 'should return true' do
         allow(ets3b).to receive(:node_name).and_return(node_name)
-        allow(ets3b).to receive(:es_api).with(:get, "#{es_url}/_cat/master").and_return(
+        allow(ets3b).to receive(:es_api).and_return(
           object_double(
-            'http_object',
-            code: 200,
-            body: [{ 'node' => node_name }]
+            'elasticsearch_connection',
+            nodes: nodes_object,
+            cluster: object_double(
+              'cluster_object',
+              state: {
+                'master_node' => master_node_id
+              }
+            )
           )
         )
         expect(ets3b.master?).to eq true
@@ -175,11 +98,16 @@ describe EverTools::ElasticsearchS3Backup do
     context 'node is not a master' do
       it 'should return false' do
         allow(ets3b).to receive(:node_name).and_return(node_name)
-        allow(ets3b).to receive(:es_api).with(:get, "#{es_url}/_cat/master").and_return(
+        allow(ets3b).to receive(:es_api).and_return(
           object_double(
-            'http_object',
-            code: 200,
-            body: [{ 'node' => 'some_other_node' }]
+            'elasticsearch_connection',
+            nodes: nodes_object,
+            cluster: object_double(
+              'cluster_object',
+              state: {
+                'master_node' => 'some_other_node'
+              }
+            )
           )
         )
         expect(ets3b.master?).to eq false
@@ -187,57 +115,49 @@ describe EverTools::ElasticsearchS3Backup do
     end
   end
 
-  describe '.index?' do
-    index_name = 'index_exists_test'
-
-    context 'index exists' do
-      it 'returns true' do
-        allow(ets3b).to receive(:es_api).with(:get, "#{es_url}/#{index_name}").and_return(
-          object_double(
-            'http_object',
-            code: 200
-          )
-        )
-        expect(ets3b.index?(index_name)).to eq true
-      end
+  describe '.pseudo_random_string' do
+    it 'returns a string' do
+      expect(ets3b.pseudo_random_string).to be_kind_of(String)
     end
 
-    context 'index does not exist' do
-      it 'returns false' do
-        allow(ets3b).to receive(:es_api).with(:get, "#{es_url}/#{index_name}").and_return(
-          object_double(
-            'http_object',
-            code: 404
-          )
-        )
-        expect(ets3b.index?(index_name)).to eq false
-      end
+    it 'returns a very large random number' do
+      expect(ets3b.pseudo_random_string[1..-1].to_i).to be >= 10**90
+    end
+
+    it 'returns a string with a letter' do
+      expect(ets3b.pseudo_random_string).to match(/\D/)
     end
   end
 
-  describe '.repo?' do
-    context 'repo exists' do
-      it 'returns true' do
-        allow(ets3b).to receive(:es_api).and_return(
-          object_double(
-            'http_object',
-            code: 200
-          )
-        )
-        expect(ets3b.repo?).to eq true
-      end
+  describe '.insert_test_data' do
+    let(:test_size) { 100 }
+
+    before(:each) do
+      allow(ets3b).to receive(:test_size).and_return(test_size)
+      allow(ets3b).to receive(:pseudo_random_string).and_return('big_random_string')
     end
 
-    context 'repo does not exist' do
-      it 'returns false' do
-        allow(ets3b).to receive(:es_api).and_return(
-          object_double(
-            'http_object',
-            code: 404
-          )
+    it 'log about it' do
+      allow(ets3b).to receive(:es_api).and_return(
+        object_double(
+          'elasticsearch_connection',
+          create: true
         )
-        expect(ets3b.repo?).to eq false
-      end
+      )
+      expect(ets3b.logger).to receive(:info).with('Generating test data using math…')
+    end
+
+    it 'creates a bunch of test data' do
+      expect(ets3b).to receive(:es_api).exactly(test_size).times.and_return(
+        object_double(
+          'elasticsearch_connection',
+          create: true
+        )
+      )
+    end
+
+    after(:each) do
+      ets3b.insert_test_data
     end
   end
 
@@ -278,79 +198,19 @@ describe EverTools::ElasticsearchS3Backup do
   end
 
   describe '.index_item' do
-    context 'shard has some other problem' do
-      it 'returns false' do
-        allow(Unirest).to receive(:send).and_return(
-          object_double(
-            'http_object',
-            code: 503,
-            body: 'EVERYTHING IS HORRIBLE'
-          )
-        )
+    it 'returns the test value' do
+      index = 'test_index'
+      doc_id = '99'
 
-        expect { ets3b.index_item('test_index', 0) }
-          .to raise_exception(
-            RuntimeError,
-            "GET request to http://localhost:9200/test_index/dummy/0 failed (params: {})\n" \
-            "Response code: 503\n" \
-            "Body:\n" \
-            "EVERYTHING IS HORRIBLE\n"
+      allow(ets3b).to(
+        receive_message_chain(:es_api, :get).with(index: index, type: 'dummy', id: doc_id)
+          .and_return(
+            '_source' => {
+              'test_value' => 'some_value'
+            }
           )
-      end
-    end
-  end
-
-  describe '.index_online?' do
-    context 'index shard exists' do
-      context "but isn't ready" do
-        it 'returns false' do
-          allow(Unirest).to receive(:send).and_return(
-            object_double(
-              'http_object',
-              code: 200,
-              body: {
-                'indices' => {
-                  'restore_test' => {
-                    'shards' => {
-                      '0' => [
-                        { 'state' => 'STARTED' },
-                        { 'state' => 'STARTED' }
-                      ],
-                      '1' => [
-                        { 'state' => 'STARTED' },
-                        { 'state' => 'RECOVERING' }
-                      ]
-                    }
-                  }
-                }
-              }
-            )
-          )
-          expect(ets3b.index_online?('restore_test')).to eq(false)
-        end
-      end
-
-      context 'and is ready' do
-        it 'returns true' do
-          allow(Unirest).to receive(:send).and_return(
-            object_double(
-              'http_object',
-              code: 200,
-              body: {
-                'indices' => {
-                  'restore_test' => {
-                    'shards' => {
-                      '0' => [{ 'state' => 'STARTED' }],
-                      '1' => [{ 'state' => 'STARTED' }]
-                    }
-                  }
-                }
-              }
-            )
-          )
-          expect(ets3b.index_online?('restore_test')).to eq(true)
-        end
-      end
+      )
+      expect(ets3b.index_item(index, doc_id)).to eq('some_value')
     end
   end
 
@@ -360,18 +220,25 @@ describe EverTools::ElasticsearchS3Backup do
     let(:repos) { [old_repo, recent_repo] }
 
     before(:each) do
-      allow(ets3b).to receive(:logger).and_return(
-        object_double('logger', debug: true, info: true, warn: true, fatal: true)
-      )
+      allow(ets3b).to receive_message_chain(:logger, :info)
       allow(ets3b).to receive(:dated_repos).and_return(repos)
+      allow(ets3b).to receive(:es_api).and_return(
+        object_double(
+          'elasticsearch_connection',
+          snapshot: object_double(
+            'snapshot_object',
+            delete_repository: true
+          )
+        )
+      )
     end
 
     it 'deletes backups more than 3 months old' do
-      expect(ets3b).to receive(:es_api).with(:delete, "#{es_url}/_snapshot/#{old_repo}")
+      expect(ets3b.es_api.snapshot).to receive(:delete_repository).with(repository: old_repo)
     end
 
     it 'does not delete backups less than 3 months old' do
-      expect(ets3b).to_not receive(:es_api).with(:delete, "#{es_url}/_snapshot/#{recent_repo}")
+      expect(ets3b).to_not receive(:delete_repository).with(repository: recent_repo)
     end
 
     after(:each) do
