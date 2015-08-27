@@ -6,6 +6,7 @@ require 'pagerduty'
 require 'yaml'
 require 'sentry-raven'
 require 'ostruct'
+require 'elasticsearch'
 
 module EverTools
   class ElasticsearchS3Backup
