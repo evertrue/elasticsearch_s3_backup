@@ -124,10 +124,10 @@ module EverTools
       r = es_api.snapshot.create repository: backup_repo,
                                  snapshot: snapshot_label,
                                  wait_for_completion: true
+      fail "Snapshot failed! #{r.inspect}" if r['snapshot']['failures'].any?
       logger.info 'Snapshot complete. Time: ' \
                   "#{r['snapshot']['duration_in_millis']}. " \
                   "Results: #{r['snapshot']['shards'].inspect}"
-      fail "Snapshot failed! #{r.inspect}" if r['snapshot']['failures'].any?
     end
 
     def restore_test_index
