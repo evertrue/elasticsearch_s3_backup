@@ -162,8 +162,7 @@ module EverTools
     # rubocop:disable Metrics/AbcSize, Lint/RescueException
     def run
       unless master?
-        logger.info 'This node is not the currently elected master, aborting ' \
-                    'backup.'
+        logger.info 'This node is not the currently elected master. Exiting.'
         exit 0
       end
 
