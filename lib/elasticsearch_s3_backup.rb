@@ -195,7 +195,7 @@ module EverTools
 
       remove_expired_backups
       logger.info 'Finished'
-    rescue Interrupt
+    rescue Interrupt => e
       puts "Received #{e.class}"
       exit 99
     rescue SignalException => e
