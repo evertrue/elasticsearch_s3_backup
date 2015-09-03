@@ -97,17 +97,17 @@ module EverTools
     end
 
     def create_repo
-      new_repo_params = new_repo_params.merge(
-        type: 's3',
-        settings: {
-          base_path: "/elasticsearch/#{cluster_name}/#{conf['env']}/#{backup_repo}",
-          server_side_encryption: true
+      logger.info 'Creating a new monthly ES backup repo…'
+      es_api.snapshot.create_repository(
+        repository: backup_repo,
+        body: {
+          type: 's3',
+          settings: new_repo_params.merge(
+            base_path: "/elasticsearch/#{cluster_name}/#{conf['env']}/#{backup_repo}",
+            server_side_encryption: true
+          )
         }
       )
-
-      logger.info 'Creating a new monthly ES backup repo…'
-      es_api.snapshot.create_repository repository: backup_repo,
-                                        body: new_repo_params
     end
 
     def valid_date?(date)
