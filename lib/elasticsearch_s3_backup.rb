@@ -169,9 +169,15 @@ module EverTools
     end
 
     def delete_test_indexes
+      tries ||= 1
       [@restore_test_index, @backup_test_index].each do |test_index|
         es_api.indices.delete index: test_index
       end
+    rescue Elasticsearch::Transport::Transport::Errors::Unauthorized
+      logger.info 'It seems like our auth key expired. Re-create the connection.'
+      @es_api = nil
+      tries -= 1
+      retry if tries >= 0
     end
 
     # rubocop:disable Metrics/AbcSize, Lint/RescueException
