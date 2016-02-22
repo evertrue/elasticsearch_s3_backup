@@ -180,6 +180,15 @@ module EverTools
       retry if tries >= 0
     end
 
+    def cleanup_test_indexes
+      logger.info "Removing remnant test indexes..."
+      # Gather backup test indices
+      es_api.indices.get(index: 'backup_test_*').each do |test_index, value|
+        # Check again that they are backup test indices
+        es_api.indices.delete index: test_index if test_index =~ /backup_test_(.*)/
+      end
+    end
+    
     # rubocop:disable Metrics/AbcSize, Lint/RescueException
     def run
       unless master?
@@ -187,6 +196,7 @@ module EverTools
         exit
       end
 
+      cleanup_test_indexes 
       insert_test_data
 
       # Create a new repo if none exists (typically at beginning of month)
