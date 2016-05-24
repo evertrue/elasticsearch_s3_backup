@@ -19,7 +19,6 @@ describe EverTools::ElasticsearchS3Backup do
         'max_restore_bytes_per_sec' => '500mb'
       },
       'node_fqdn' => 'spec-test-node',
-      'elasticsearch_auth_file' => 'elasticsearch-htaccess',
       'cluster_name' => 'spec_test_cluster'
     }
 
@@ -35,24 +34,6 @@ describe EverTools::ElasticsearchS3Backup do
     )
 
     e
-  end
-
-  describe '.auth' do
-    auth_file_content = "user:pass\n"
-
-    before(:each) do
-      allow(ets3b).to receive(:elasticsearch_auth_file).and_return('/path/to/file')
-    end
-
-    it 'should try to load the auth file' do
-      expect(File).to receive(:read).and_return(auth_file_content)
-      ets3b.auth
-    end
-
-    it 'should return an array with no newline chars' do
-      allow(File).to receive(:read).and_return(auth_file_content)
-      expect(ets3b.auth).to eq(auth_file_content.strip)
-    end
   end
 
   # describe '.logger' do
