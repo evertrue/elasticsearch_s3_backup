@@ -18,7 +18,6 @@ module EverTools
                    :new_repo_params,
                    :sentry_dsn,
                    :node_name,
-                   :elasticsearch_auth_file,
                    :cluster_name
 
     attr_reader :conf, :backup_repo, :snapshot_label
@@ -60,14 +59,10 @@ module EverTools
       Raven.capture_exception(e) if sentry_dsn
     end
 
-    def auth
-      File.read(elasticsearch_auth_file).strip
-    end
-
     def es_api
       @es_api ||= begin
         es_host = @conf['es_host'] || 'localhost'
-        Elasticsearch::Client.new host: "http://#{auth}@#{es_host}:9200",
+        Elasticsearch::Client.new host: "http://#{es_host}:9200",
                                   transport_options: {
                                     request: {
                                       timeout: 1200
@@ -173,11 +168,6 @@ module EverTools
       [@restore_test_index, @backup_test_index].each do |test_index|
         es_api.indices.delete index: test_index
       end
-    rescue Elasticsearch::Transport::Transport::Errors::Unauthorized
-      logger.info 'It seems like our auth key expired. Re-create the connection.'
-      @es_api = nil
-      tries -= 1
-      retry if tries >= 0
     end
 
     def cleanup_test_indexes
