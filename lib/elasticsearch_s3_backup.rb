@@ -15,6 +15,7 @@ module EverTools
     def_delegators :@conf,
                    :pagerduty_api_key,
                    :test_size,
+                   :es_transport_timeout,
                    :new_repo_params,
                    :sentry_dsn,
                    :node_name,
@@ -65,7 +66,7 @@ module EverTools
         Elasticsearch::Client.new host: "http://#{es_host}:9200",
                                   transport_options: {
                                     request: {
-                                      timeout: 1200
+                                      timeout: (es_transport_timeout || 2400)
                                     }
                                   }
       end

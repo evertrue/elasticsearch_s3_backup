@@ -13,6 +13,7 @@ describe EverTools::ElasticsearchS3Backup do
       'pagerduty_api_key' => 'BOGUS_API_KEY',
       'test_size' => 100,
       'log' => './s3_backup.log',
+      'es_transport_timeout' => 2400,
       'new_repo_params' => {
         'bucket' => 'backups.s3.bucket',
         'max_snapshot_bytes_per_sec' => '100mb',

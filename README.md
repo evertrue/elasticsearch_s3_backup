@@ -21,6 +21,7 @@ Create a YAML file called `/etc/s3_backup.yml` and give it the following content
       max_snapshot_bytes_per_sec: 100mb
       max_restore_bytes_per_sec: 500mb
     env: stage
+    es_transport_timeout: 2400
     pagerduty_api_key: @@YOUR_PAGERDUTY_API_KEY@@
     node_name: @@THIS_NODE'S_NAME@@
     elasticsearch_auth_file: "/usr/local/elasticsearch/password"
