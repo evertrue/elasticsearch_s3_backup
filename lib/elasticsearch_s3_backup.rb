@@ -206,7 +206,6 @@ module EverTools
     end
 
     def delete_test_indexes
-      tries ||= 1
       [@restore_test_index, @backup_test_index].each do |test_index|
         es_api.indices.delete index: test_index
       end
