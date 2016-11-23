@@ -23,6 +23,44 @@ module EverTools
 
     attr_reader :conf, :backup_repo, :snapshot_label
 
+    # rubocop:disable Metrics/AbcSize, Lint/RescueException
+    def run
+      unless master?
+        logger.info 'This node is not the currently elected master. Exiting.'
+        exit
+      end
+
+      cleanup_test_indexes
+      insert_test_data
+
+      # Create a new repo if none exists (typically at beginning of month)
+      create_repo unless es_api.snapshot.get_repository[backup_repo]
+      create_snapshot
+      restore_test_index
+      # Compare each doc in the original backup_test index to the restored index
+      logger.info "Verifying the newly-restored #{@backup_test_index}…"
+      test_size.times { |i| compare_index_item! i }
+      logger.info 'Successfully verified the test data!'
+      delete_test_indexes
+
+      remove_expired_backups
+      logger.info 'Finished'
+    rescue Interrupt => e
+      puts "Received #{e.class}"
+      exit 99
+    rescue SignalException => e
+      logger.info "Received: #{e.signm} (#{e.signo})"
+      exit 2
+    rescue SystemExit => e
+      exit e.status
+    rescue Exception => e # Need to rescue "Exception" so that Sentry gets it
+      notify e
+      logger.fatal e.message
+      logger.fatal e.backtrace.join("\n")
+      raise e
+    end
+    # rubocop:enable Metrics/AbcSize, Lint/RescueException
+
     def initialize
       @conf = OpenStruct.new(YAML.load_file('/etc/s3_backup.yml'))
 
@@ -39,6 +77,8 @@ module EverTools
       @backup_repo        = now.strftime '%m-%Y'
       @snapshot_label     = now.strftime '%m-%d_%H%M'
     end
+
+    private
 
     def logger
       @logger ||= Logger.new(conf['log']).tap { |l| l.progname = 's3_backup' }
@@ -179,43 +219,5 @@ module EverTools
         es_api.indices.delete index: test_index if test_index =~ /backup_test_(.*)/
       end
     end
-    
-    # rubocop:disable Metrics/AbcSize, Lint/RescueException
-    def run
-      unless master?
-        logger.info 'This node is not the currently elected master. Exiting.'
-        exit
-      end
-
-      cleanup_test_indexes 
-      insert_test_data
-
-      # Create a new repo if none exists (typically at beginning of month)
-      create_repo unless es_api.snapshot.get_repository[backup_repo]
-      create_snapshot
-      restore_test_index
-      # Compare each doc in the original backup_test index to the restored index
-      logger.info "Verifying the newly-restored #{@backup_test_index}…"
-      test_size.times { |i| compare_index_item! i }
-      logger.info 'Successfully verified the test data!'
-      delete_test_indexes
-
-      remove_expired_backups
-      logger.info 'Finished'
-    rescue Interrupt => e
-      puts "Received #{e.class}"
-      exit 99
-    rescue SignalException => e
-      logger.info "Received: #{e.signm} (#{e.signo})"
-      exit 2
-    rescue SystemExit => e
-      exit e.status
-    rescue Exception => e # Need to rescue "Exception" so that Sentry gets it
-      notify e
-      logger.fatal e.message
-      logger.fatal e.backtrace.join("\n")
-      raise e
-    end
-    # rubocop:enable Metrics/AbcSize, Lint/RescueException
   end
 end
