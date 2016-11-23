@@ -180,7 +180,7 @@ module EverTools
 
     def restore_test_index
       # Restore just the backup_test index to a new index
-      logger.info 'Restoring the backup_test index…'
+      logger.info "Restoring the #{@backup_test_index} index to #{@restore_test_index}…"
       es_api.snapshot.restore repository: backup_repo,
                               snapshot: snapshot_label,
                               wait_for_completion: true,
