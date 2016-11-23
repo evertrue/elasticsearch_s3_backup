@@ -36,6 +36,7 @@ module EverTools
       # Create a new repo if none exists (typically at beginning of month)
       create_repo unless es_api.snapshot.get_repository[backup_repo]
       create_snapshot
+
       restore_test_index
       # Compare each doc in the original backup_test index to the restored index
       logger.info "Verifying the newly-restored #{@backup_test_index}…"
