@@ -212,9 +212,9 @@ module EverTools
     end
 
     def cleanup_test_indexes
-      logger.info "Removing remnant test indexes..."
+      logger.info 'Removing remnant test indexes...'
       # Gather backup test indices
-      es_api.indices.get(index: 'backup_test_*').each do |test_index, value|
+      es_api.indices.get(index: 'backup_test_*').each do |test_index, _value|
         # Check again that they are backup test indices
         es_api.indices.delete index: test_index if test_index =~ /backup_test_(.*)/
       end
