@@ -6,6 +6,7 @@ require 'pagerduty'
 require 'yaml'
 require 'sentry-raven'
 require 'ostruct'
+require 'hashie'
 require 'elasticsearch'
 
 module EverTools
@@ -29,6 +30,8 @@ module EverTools
         logger.info 'This node is not the currently elected master. Exiting.'
         exit
       end
+
+      check_cluster_state!
 
       cleanup_test_indexes
       insert_test_data
@@ -115,6 +118,14 @@ module EverTools
 
     def master?
       es_api.nodes.info['nodes'][es_api.cluster.state['master_node']]['name'] == node_name
+    end
+
+    def check_cluster_state!
+      cluster_settings = Hashie::Mash.new es_api.cluster.get_settings
+      if cluster_settings.transient_.cluster_.routing_.allocation_.enable == 'none'
+        fail 'Shard reallocation is disabled. Snapshot cannot proceed because creating the test ' \
+             'index in this state will put the cluster into RED state.'
+      end
     end
 
     def pseudo_random_string
