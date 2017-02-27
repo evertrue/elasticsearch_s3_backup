@@ -31,7 +31,7 @@ module EverTools
         exit
       end
 
-      check_cluster_state!
+      wait_for_cluster_state!
 
       cleanup_test_indexes
       insert_test_data
@@ -120,11 +120,15 @@ module EverTools
       es_api.nodes.info['nodes'][es_api.cluster.state['master_node']]['name'] == node_name
     end
 
-    def check_cluster_state!
-      cluster_settings = Hashie::Mash.new es_api.cluster.get_settings
-      if cluster_settings.transient_.cluster_.routing_.allocation_.enable == 'none'
+    def wait_for_cluster_state!
+      tries = 0
+      until (cluster_settings = Hashie::Mash.new es_api.cluster.get_settings) &&
+            cluster_settings.transient_.cluster_.routing_.allocation_.enable == 'none'
         fail 'Shard reallocation is disabled. Snapshot cannot proceed because creating the test ' \
-             'index in this state will put the cluster into RED state.'
+             'index in this state will put the cluster into RED state.' if tries >= 5
+        logger.warn 'Waiting for shard reallocation to be re-enabled'
+        sleep 10
+        tries += 1
       end
     end
 
