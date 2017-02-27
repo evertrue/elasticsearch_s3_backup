@@ -73,7 +73,7 @@ describe EverTools::ElasticsearchS3Backup do
             )
           )
         )
-        expect(ets3b.master?).to eq true
+        expect(ets3b.send(:master?)).to eq true
       end
     end
 
@@ -92,22 +92,22 @@ describe EverTools::ElasticsearchS3Backup do
             )
           )
         )
-        expect(ets3b.master?).to eq false
+        expect(ets3b.send(:master?)).to eq false
       end
     end
   end
 
   describe '.pseudo_random_string' do
     it 'returns a string' do
-      expect(ets3b.pseudo_random_string).to be_kind_of(String)
+      expect(ets3b.send(:pseudo_random_string)).to be_kind_of(String)
     end
 
     it 'returns a very large random number' do
-      expect(ets3b.pseudo_random_string[1..-1].to_i).to be >= 10**90
+      expect(ets3b.send(:pseudo_random_string)[1..-1].to_i).to be >= 10**90
     end
 
     it 'returns a string with a letter' do
-      expect(ets3b.pseudo_random_string).to match(/\D/)
+      expect(ets3b.send(:pseudo_random_string)).to match(/\D/)
     end
   end
 
@@ -126,7 +126,7 @@ describe EverTools::ElasticsearchS3Backup do
           create: true
         )
       )
-      expect(ets3b.logger).to receive(:info).with('Generating test data using math…')
+      expect(ets3b.send(:logger)).to receive(:info).with('Generating test data using math…')
     end
 
     it 'creates a bunch of test data' do
@@ -139,7 +139,7 @@ describe EverTools::ElasticsearchS3Backup do
     end
 
     after(:each) do
-      ets3b.insert_test_data
+      ets3b.send(:insert_test_data)
     end
   end
 
@@ -159,7 +159,7 @@ describe EverTools::ElasticsearchS3Backup do
     context 'Env: prod' do
       it 'send a trigger to PagerDuty' do
         allow(ets3b).to receive(:conf).and_return('env' => 'prod')
-        expect(ets3b.pagerduty).to receive(:trigger).with(
+        expect(ets3b.send(:pagerduty)).to receive(:trigger).with(
           'prod Elasticsearch S3 failed',
           client: node_name,
           details: "#{test_exception.message}\n\n#{test_exception.backtrace}"
@@ -170,12 +170,12 @@ describe EverTools::ElasticsearchS3Backup do
     context 'Env: stage' do
       it 'does not send a trigger to PagerDuty' do
         allow(ets3b).to receive(:conf).and_return('env' => 'stage')
-        expect(ets3b.pagerduty).to_not receive(:trigger)
+        expect(ets3b.send(:pagerduty)).to_not receive(:trigger)
       end
     end
 
     after(:each) do
-      ets3b.notify(test_exception)
+      ets3b.send(:notify, test_exception)
     end
   end
 
@@ -192,7 +192,7 @@ describe EverTools::ElasticsearchS3Backup do
             }
           )
       )
-      expect(ets3b.index_item(index, doc_id)).to eq('some_value')
+      expect(ets3b.send(:index_item, index, doc_id)).to eq('some_value')
     end
   end
 
@@ -216,7 +216,7 @@ describe EverTools::ElasticsearchS3Backup do
     end
 
     it 'deletes backups more than 3 months old' do
-      expect(ets3b.es_api.snapshot).to receive(:delete_repository).with(repository: old_repo)
+      expect(ets3b.send(:es_api).snapshot).to receive(:delete_repository).with(repository: old_repo)
     end
 
     it 'does not delete backups less than 3 months old' do
@@ -224,7 +224,7 @@ describe EverTools::ElasticsearchS3Backup do
     end
 
     after(:each) do
-      ets3b.remove_expired_backups
+      ets3b.send(:remove_expired_backups)
     end
   end
 end
