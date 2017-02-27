@@ -41,4 +41,5 @@ Gem::Specification.new do |spec|
   spec.add_dependency 'pagerduty'
   spec.add_dependency 'sentry-raven'
   spec.add_dependency 'elasticsearch'
+  spec.add_dependency 'hashie'
 end
