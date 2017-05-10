@@ -160,7 +160,8 @@ describe EverTools::ElasticsearchS3Backup do
       it 'send a trigger to PagerDuty' do
         allow(ets3b).to receive(:conf).and_return('env' => 'prod')
         expect(ets3b.send(:pagerduty)).to receive(:trigger).with(
-          'prod Elasticsearch S3 failed',
+          'spec_test_cluster Elasticsearch backup failed',
+          incident_key: 'spec_test_cluster elasticsearch backup',
           client: node_name,
           details: "#{test_exception.message}\n\n#{test_exception.backtrace}"
         )

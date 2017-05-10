@@ -48,6 +48,12 @@ module EverTools
       delete_test_indexes
 
       remove_expired_backups
+
+      # Resolve any open Pagerduty incidents from previous backup failures
+      if (pd_incident = pagerduty.get_incident("#{cluster_name} elasticsearch backup"))
+        pd_incident.resolve
+      end
+
       logger.info 'Finished'
     rescue Interrupt => e
       puts "Received #{e.class}"
@@ -95,7 +101,8 @@ module EverTools
     def notify(e)
       if conf['env'] == 'prod'
         pagerduty.trigger(
-          'prod Elasticsearch S3 failed',
+          "#{cluster_name} Elasticsearch backup failed",
+          incident_key: "#{cluster_name} elasticsearch backup",
           client: node_name,
           details: "#{e.message}\n\n#{e.backtrace}"
         )
